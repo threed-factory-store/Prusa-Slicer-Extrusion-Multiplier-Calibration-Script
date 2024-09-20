@@ -14,7 +14,7 @@ argv_gcode_file         = 1
 argv_stl_file           = 2
 argv_multiplier_low     = 3
 argv_multiplier_high    = 4
-argv_len_required       = 5
+argv_len_required       = 5     # this is not an index into sys.argv.  It separates required parameters from optional ones.
 argv_output_file        = 5
 
 modified_by_PPScript = "Modified by PPScript"
@@ -23,18 +23,13 @@ def usage():
     print("Usage:")
     print("       python Calibrate-Flow-Embedded.py  InputGCodeFilename  StlFilename  LowExtrusionMultiplier  HighExtrusionMultiplier [OutputGCodeFilename]")
     print("")
-    print("       If you don't specify an OutputGCodeFilename, then you must recreate the input gcode file every time before you run this app.  Otherwise, you will not get the results you expect.")
+    print("       Extrusion Multipliers can be specified, for example, as 0.7 or 70 to get 70%")
+    print("")
+    print("       If you don't specify an OutputGCodeFilename, then you must recreate the input gcode file every time before you run this app.  Otherwise, you will get an error.")
     sys.exit(1)
 
 
-if len(sys.argv) < argv_len_required:
-    usage()
-
-
 def get_multiplier(value):
-    # User can specify multiplier as a percentage (0.70) or as a whole number (70)
-    # We will convert to percentage as needed.
-    # Values will probably be between 0.5 and 1.5 or 50 and 150, but we'll take anything.
     result = 0
     try:
         result = float(value)
@@ -61,6 +56,9 @@ def multiplier_key(id, copy):
     return str(id)+"_"+str(copy)
 
 
+if len(sys.argv) < argv_len_required:
+    usage()
+
 gcode_file_path, gcode_file_folder, gcode_file_name = get_filename(sys.argv[argv_gcode_file])
 stl_file_path,   stl_file_folder, stl_file_name   = get_filename(sys.argv[argv_stl_file])
 
@@ -68,13 +66,13 @@ multiplier_low  = get_multiplier(sys.argv[argv_multiplier_low])
 multiplier_high = get_multiplier(sys.argv[argv_multiplier_high])
 
 output_file_path = gcode_file_path
-if len(sys.argv) > argv_len_required and sys.argv[argv_output_file]:
+if len(sys.argv) > argv_output_file and sys.argv[argv_output_file]:
     output_file_path = sys.argv[argv_output_file]
 output_file_path, output_file_folder, output_file_name =  get_filename(output_file_path)
 
 if gcode_file_path == output_file_path:
     print("WARNING:  If you run this app multiple times on the same gcode file,")
-    print("          you will NOT get the results you expect.")
+    print("          you will get an error.")
     print("          Consider providing an output filename.")
 
 try:
@@ -82,12 +80,12 @@ try:
         file_content = file.read()
         print(f"G-Code file loaded: {gcode_file_name}")
 except:
-    print(f"G-Code file not found: {gcode_file_name}")
+    print(f"G-Code file not found: {gcode_file_path}")
     sys.exit(3)
 
-unique_lines = list()
 
-# Find each time we switch to a new model
+# Count the models in our input gcode file
+unique_lines = list()
 for line in file_content.split("\n"):
     if line.startswith(f"; printing object {stl_file_name}") and line not in unique_lines:
         unique_lines.append(line)
@@ -97,7 +95,7 @@ for line in file_content.split("\n"):
         sys.exit(5)
 unique_lines.sort()
 
-num_models = len(unique_lines)  # Get the unique count of lines
+num_models = len(unique_lines)
 print(f"Found {num_models} models in G-Code")
 if num_models == 0:
     sys.exit(4)
@@ -109,7 +107,7 @@ if num_models == 0:
 max_id_number = 0
 max_copy_number = 0
 for l in unique_lines:
-    # ; printing object 30x30x3.stl id:0 copy 1
+    # ; printing object MyModel.stl id:0 copy 1
     search_result = re.search(".* id:([0-9]*) copy ([0-9]*)", l)
     
     extracted_id_number = int(search_result.group(1))
@@ -130,10 +128,6 @@ for id in range(num_ids):
     for copy in range(num_copies):
         multipliers[multiplier_key(id, copy)] = round(multiplier_low + (multiplier_inc * (id+1) * copy), 2)
 
-base_extrusion_Multiplier = 0.0
-for value in multipliers.values():
-    base_extrusion_Multiplier = max(base_extrusion_Multiplier, value)
-
 replacementsmade = []
 modified_content = file_content
 for l in unique_lines:
@@ -144,12 +138,16 @@ for l in unique_lines:
     print(f"Modifying Object: {obj_name}, id:{id}, copy:{copy}")
     # Get the new Extrusion Multiplier for model
     extrusion_Multiplier = multipliers[multiplier_key(id, copy)]
-    M221_value = round(extrusion_Multiplier, 2)*100
+    M221_value = extrusion_Multiplier * 100
     
     # Perform operations specific to each model
     for j, line in enumerate(modified_content.split("\n")):
         if line == l:
             replacecount = modified_content.count(line)
+            # This is why we can't process the same file twice if we modify in place:
+            # We add the M221 line right after the original line.
+            # If there's already an M221 line, our new one will go in front of it
+            # and the one that's already there will still be the M221 value that gets used.
             modified_line = line + f"\nM221 S{M221_value} ; Set Extrusion Multiplier to {M221_value} : {modified_by_PPScript}"  # Modify the line
             modified_content = modified_content.replace(line, modified_line)  # Replace the line in modified_content
             replacementsmade.append(f'Object {obj_name} modified: {replacecount} times | Extrusion Multiplier set to: {M221_value}')
