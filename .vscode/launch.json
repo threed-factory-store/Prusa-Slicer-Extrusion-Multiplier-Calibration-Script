@@ -14,7 +14,8 @@
                 "/home/walt/Documents/MyCameraGrip/Calibration_Dev/Input/30x30x3/30x30x3_x4_PCCF.gcode",
                 "30x30x3.stl",
                 "0.70",
-                "0.90"
+                "0.90",
+                "/home/walt/Documents/MyCameraGrip/Calibration_Dev/Output/30x30x3_x4_PCCF.gcode"
             ]
         }
     ]
